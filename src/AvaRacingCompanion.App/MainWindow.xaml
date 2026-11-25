@@ -181,7 +181,33 @@
                     Content="60-Hz-Runden-Traces für Kurvenanalyse hochladen"
                     Checked="OnSettingsControlChanged"
                     Unchecked="OnSettingsControlChanged"
-                    Foreground="#F2F4F8" />
+                    Foreground="#F2F4F8"
+                    Margin="0,0,0,6" />
+
+          <CheckBox x:Name="ImportIbtCheckBox"
+                    Content="Vorhandene &amp; neue .ibt-Dateien automatisch importieren"
+                    Checked="OnSettingsControlChanged"
+                    Unchecked="OnSettingsControlChanged"
+                    Foreground="#F2F4F8"
+                    Margin="0,0,0,8" />
+
+          <DockPanel>
+            <Button x:Name="ScanIbtButton"
+                    DockPanel.Dock="Right"
+                    Content=".ibt jetzt scannen"
+                    Click="OnScanIbtClick"
+                    Padding="10,4"
+                    Background="#2A3342"
+                    Foreground="#E5ECF5"
+                    BorderThickness="0"
+                    Cursor="Hand" />
+            <TextBlock Text="Uploads &amp; .ibt-Imports pausieren automatisch, solange du aktiv im Auto sitzt."
+                       FontSize="11"
+                       Foreground="#8C9BB0"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0" />
+          </DockPanel>
         </StackPanel>
       </Border>
 

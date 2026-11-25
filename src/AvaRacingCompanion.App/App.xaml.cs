@@ -58,7 +58,8 @@ public partial class App : WpfApplication
             onApplyUpdateNowRequested: ApplyUpdateAndRestart,
             onTestConnectionRequested: url => _telemetryApiClient.CheckHealthAsync(url),
             onPairRequested: HandlePairRequestedAsync,
-            onUnpairRequested: HandleUnpairRequested);
+            onUnpairRequested: HandleUnpairRequested,
+            onScanIbtRequested: () => _telemetryCoordinator.RequestManualIbtScan());
 
         _telemetryCoordinator.StatusChanged += status =>
         {

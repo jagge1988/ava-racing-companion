@@ -63,6 +63,18 @@ public sealed record AppSettings
 
     public bool UploadTracesEnabled { get; init; } = true;
 
+    /// <summary>
+    /// Überwacht automatisch %USERPROFILE%\Documents\iRacing\telemetry\*.ibt und
+    /// lädt abgeschlossene Sessions hoch (nur solange der Fahrer nicht aktiv im Auto sitzt).
+    /// </summary>
+    public bool ImportIbtFilesEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Optionaler benutzerdefinierter Pfad zum iRacing-Telemetrie-Ordner.
+    /// Leer = Standard (%USERPROFILE%\Documents\iRacing\telemetry).
+    /// </summary>
+    public string IbtFolderPath { get; init; } = string.Empty;
+
     [JsonIgnore]
     public bool IsPaired => !string.IsNullOrWhiteSpace(DeviceToken);
 

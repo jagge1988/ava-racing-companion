@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private readonly Func<string, Task<ApiCallResult>> _onTestConnectionRequested;
     private readonly Func<string, string, Task<PairResult>> _onPairRequested;
     private readonly Action _onUnpairRequested;
+    private readonly Func<bool> _onScanIbtRequested;
 
     private AppSettings _currentSettings;
     private string? _latestReleaseUrl;
@@ -30,7 +31,8 @@ public partial class MainWindow : Window
         Action onApplyUpdateNowRequested,
         Func<string, Task<ApiCallResult>> onTestConnectionRequested,
         Func<string, string, Task<PairResult>> onPairRequested,
-        Action onUnpairRequested)
+        Action onUnpairRequested,
+        Func<bool> onScanIbtRequested)
     {
         InitializeComponent();
 
@@ -41,6 +43,7 @@ public partial class MainWindow : Window
         _onTestConnectionRequested = onTestConnectionRequested;
         _onPairRequested = onPairRequested;
         _onUnpairRequested = onUnpairRequested;
+        _onScanIbtRequested = onScanIbtRequested;
 
         VersionText.Text = $"v{AppInfo.GetCurrentVersion()}";
         AutoUpdateRadio.IsChecked = initialSettings.UpdateBehavior == UpdateBehavior.AutoUpdate;
@@ -50,6 +53,7 @@ public partial class MainWindow : Window
         ServerUrlTextBox.Text = initialSettings.ServerBaseUrl;
         TelemetryEnabledCheckBox.IsChecked = initialSettings.TelemetryEnabled;
         UploadTracesCheckBox.IsChecked = initialSettings.UploadTracesEnabled;
+        ImportIbtCheckBox.IsChecked = initialSettings.ImportIbtFilesEnabled;
         RefreshPairingUi(initialSettings);
 
         _isInitializing = false;
@@ -166,10 +170,19 @@ public partial class MainWindow : Window
             LaunchAtStartup = AutostartCheckBox.IsChecked == true,
             ServerBaseUrl = ServerUrlTextBox.Text ?? string.Empty,
             TelemetryEnabled = TelemetryEnabledCheckBox.IsChecked == true,
-            UploadTracesEnabled = UploadTracesCheckBox.IsChecked == true
+            UploadTracesEnabled = UploadTracesCheckBox.IsChecked == true,
+            ImportIbtFilesEnabled = ImportIbtCheckBox.IsChecked == true
         };
 
         _onSettingsChanged(_currentSettings);
+    }
+
+    private void OnScanIbtClick(object sender, RoutedEventArgs e)
+    {
+        var started = _onScanIbtRequested();
+        ShowConnectionFeedback(started
+            ? "Suche nach neuen .ibt-Dateien im iRacing-Telemetrie-Ordner gestartet ..."
+            : "Scan verschoben: Du sitzt aktuell im Auto (keine Hintergrund-Aktivität beim Fahren).");
     }
 
     private async void OnTestConnectionClick(object sender, RoutedEventArgs e)

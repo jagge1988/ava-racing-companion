@@ -1,5 +1,4 @@
 using System.IO.MemoryMappedFiles;
-using System.Runtime.InteropServices;
 using System.Text;
 
 namespace AvaRacingCompanion.Telemetry.Sdk;
@@ -12,15 +11,11 @@ public sealed class IRacingMemoryMappedReader : IDisposable
 {
     private const string MemMapFileName = "Local\\IRSDKMemMapFileName";
     private const int HeaderSize = 112;
-    private const int VarHeaderSize = 144;
-    private const int MaxCarIdx = 64;
-
-    private sealed record VarDef(int Type, int Offset, int Count);
 
     private MemoryMappedFile? _mmf;
     private MemoryMappedViewAccessor? _accessor;
     private byte[] _dataBuffer = Array.Empty<byte>();
-    private readonly Dictionary<string, VarDef> _vars = new(StringComparer.Ordinal);
+    private readonly IRacingVarTable _varTable = new();
 
     private int _lastSessionInfoUpdate = -1;
     private int _lastTickCount = -1;
@@ -63,7 +58,6 @@ public sealed class IRacingMemoryMappedReader : IDisposable
         _accessor = null;
         _mmf?.Dispose();
         _mmf = null;
-        _vars.Clear();
         _lastSessionInfoUpdate = -1;
         _lastTickCount = -1;
         _currentMetadata = SessionMetadata.Empty();
@@ -142,12 +136,10 @@ public sealed class IRacingMemoryMappedReader : IDisposable
                 _dataBuffer = new byte[bufLen];
             }
 
-            // Lock-freie Konsistenzprüfung: TickCount vor und nach dem Kopieren vergleichen
-            var tickAfter = -1;
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 _accessor.ReadArray(latestBufOffset, _dataBuffer, 0, bufLen);
-                tickAfter = _accessor.ReadInt32(48 + (latestBufIndex * 16));
+                var tickAfter = _accessor.ReadInt32(48 + (latestBufIndex * 16));
                 if (tickAfter == latestTick)
                 {
                     break;
@@ -157,7 +149,7 @@ public sealed class IRacingMemoryMappedReader : IDisposable
             }
 
             _lastTickCount = latestTick;
-            return BuildFrame(latestTick);
+            return _varTable.BuildFrame(_dataBuffer.AsSpan(0, bufLen), latestTick);
         }
         catch
         {
@@ -173,7 +165,6 @@ public sealed class IRacingMemoryMappedReader : IDisposable
             return;
         }
 
-        _vars.Clear();
         var numVars = _accessor.ReadInt32(24);
         var varHeaderOffset = _accessor.ReadInt32(28);
         if (numVars <= 0 || varHeaderOffset < HeaderSize)
@@ -181,167 +172,10 @@ public sealed class IRacingMemoryMappedReader : IDisposable
             return;
         }
 
-        var nameBuf = new byte[32];
-        for (var i = 0; i < numVars; i++)
-        {
-            var entryOffset = varHeaderOffset + (i * VarHeaderSize);
-            var type = _accessor.ReadInt32(entryOffset);
-            var offset = _accessor.ReadInt32(entryOffset + 4);
-            var count = _accessor.ReadInt32(entryOffset + 8);
-            _accessor.ReadArray(entryOffset + 16, nameBuf, 0, 32);
-
-            var zeroIdx = Array.IndexOf(nameBuf, (byte)0);
-            var name = Encoding.ASCII.GetString(nameBuf, 0, zeroIdx >= 0 ? zeroIdx : nameBuf.Length);
-            if (!string.IsNullOrEmpty(name))
-            {
-                _vars[name] = new VarDef(type, offset, count);
-            }
-        }
-    }
-
-    private TelemetryFrame BuildFrame(int tickCount)
-    {
-        var ersFraction = ReadFloat("EnergyERSBatteryPct", defaultValue: -1f);
-        var ersPct = ersFraction >= 0f ? ersFraction * 100f : 0f;
-
-        return new TelemetryFrame
-        {
-            TickCount = tickCount,
-            SessionTimeSeconds = ReadDouble("SessionTime"),
-            SessionNum = ReadInt("SessionNum"),
-            Lap = ReadInt("Lap"),
-            LapLastLapTimeSeconds = ReadFloat("LapLastLapTime"),
-            LapDistMeters = ReadFloat("LapDist"),
-            Lat = ReadDouble("Lat"),
-            Lon = ReadDouble("Lon"),
-            SpeedMetersPerSec = ReadFloat("Speed"),
-            Throttle = ReadFloat("Throttle"),
-            Brake = ReadFloat("Brake"),
-            SteeringWheelAngleRad = ReadFloat("SteeringWheelAngle"),
-            VelocityX = ReadFloat("VelocityX"),
-            VelocityY = ReadFloat("VelocityY"),
-            Gear = ReadInt("Gear"),
-            Rpm = ReadFloat("RPM"),
-            FuelLevelLiters = ReadFloat("FuelLevel"),
-            TrackTempCelsius = ReadFloat("TrackTempCrew", ReadFloat("TrackTemp")),
-            PlayerIncidents = ReadInt("PlayerCarMyIncidentCount"),
-            PlayerTireCompound = ReadInt("PlayerTireCompound", -1),
-            LfWearL = ReadFloat("LFwearL", 1f),
-            LfWearM = ReadFloat("LFwearM", 1f),
-            LfWearR = ReadFloat("LFwearR", 1f),
-            RfWearL = ReadFloat("RFwearL", 1f),
-            RfWearM = ReadFloat("RFwearM", 1f),
-            RfWearR = ReadFloat("RFwearR", 1f),
-            LrWearL = ReadFloat("LRwearL", 1f),
-            LrWearM = ReadFloat("LRwearM", 1f),
-            LrWearR = ReadFloat("LRwearR", 1f),
-            RrWearL = ReadFloat("RRwearL", 1f),
-            RrWearM = ReadFloat("RRwearM", 1f),
-            RrWearR = ReadFloat("RRwearR", 1f),
-            OnPitRoad = ReadBool("OnPitRoad"),
-            PlayerTrackSurface = (TrackSurface)ReadInt("PlayerTrackSurface", (int)TrackSurface.OnTrack),
-            PitSvFlags = ReadInt("PitSvFlags"),
-            BrakeAbsActive = ReadBool("BrakeABSactive"),
-            TractionControlActive = false,
-            DrsStatus = ReadInt("DRS_Status"),
-            ErsBatteryPct = ersPct,
-            CarIdxLap = ReadIntArray("CarIdxLap", MaxCarIdx),
-            CarIdxTireCompound = ReadIntArray("CarIdxTireCompound", MaxCarIdx),
-            CarIdxOnPitRoad = ReadBoolArray("CarIdxOnPitRoad", MaxCarIdx),
-            CarIdxTrackSurface = ReadIntArray("CarIdxTrackSurface", MaxCarIdx)
-        };
-    }
-
-    private bool ReadBool(string name)
-    {
-        if (!_vars.TryGetValue(name, out var v) || v.Offset >= _dataBuffer.Length)
-        {
-            return false;
-        }
-
-        return _dataBuffer[v.Offset] != 0;
-    }
-
-    private int ReadInt(string name, int defaultValue = 0)
-    {
-        if (!_vars.TryGetValue(name, out var v) || v.Offset + 4 > _dataBuffer.Length)
-        {
-            return defaultValue;
-        }
-
-        return MemoryMarshal.Read<int>(_dataBuffer.AsSpan(v.Offset, 4));
-    }
-
-    private float ReadFloat(string name, float defaultValue = 0f)
-    {
-        if (!_vars.TryGetValue(name, out var v) || v.Offset + 4 > _dataBuffer.Length)
-        {
-            return defaultValue;
-        }
-
-        return MemoryMarshal.Read<float>(_dataBuffer.AsSpan(v.Offset, 4));
-    }
-
-    private double ReadDouble(string name, double defaultValue = 0.0)
-    {
-        if (!_vars.TryGetValue(name, out var v))
-        {
-            return defaultValue;
-        }
-
-        if (v.Type == 5 && v.Offset + 8 <= _dataBuffer.Length)
-        {
-            return MemoryMarshal.Read<double>(_dataBuffer.AsSpan(v.Offset, 8));
-        }
-
-        if (v.Type == 4 && v.Offset + 4 <= _dataBuffer.Length)
-        {
-            return MemoryMarshal.Read<float>(_dataBuffer.AsSpan(v.Offset, 4));
-        }
-
-        return defaultValue;
-    }
-
-    private int[] ReadIntArray(string name, int maxCount)
-    {
-        if (!_vars.TryGetValue(name, out var v))
-        {
-            return Array.Empty<int>();
-        }
-
-        var count = Math.Min(v.Count, maxCount);
-        var result = new int[count];
-        for (var i = 0; i < count; i++)
-        {
-            var off = v.Offset + (i * 4);
-            if (off + 4 <= _dataBuffer.Length)
-            {
-                result[i] = MemoryMarshal.Read<int>(_dataBuffer.AsSpan(off, 4));
-            }
-        }
-
-        return result;
-    }
-
-    private bool[] ReadBoolArray(string name, int maxCount)
-    {
-        if (!_vars.TryGetValue(name, out var v))
-        {
-            return Array.Empty<bool>();
-        }
-
-        var count = Math.Min(v.Count, maxCount);
-        var result = new bool[count];
-        for (var i = 0; i < count; i++)
-        {
-            var off = v.Offset + i;
-            if (off < _dataBuffer.Length)
-            {
-                result[i] = _dataBuffer[off] != 0;
-            }
-        }
-
-        return result;
+        var totalBytes = numVars * IRacingVarTable.VarHeaderSize;
+        var rawHeaders = new byte[totalBytes];
+        _accessor.ReadArray(varHeaderOffset, rawHeaders, 0, totalBytes);
+        _varTable.LoadFromHeaderBytes(rawHeaders, numVars);
     }
 
     public void Dispose()

@@ -16,6 +16,7 @@ public enum TrackSurface
 public sealed record TelemetryFrame
 {
     public int TickCount { get; init; }
+    public bool IsOnTrack { get; init; }
     public double SessionTimeSeconds { get; init; }
     public int SessionNum { get; init; }
     public int Lap { get; init; }
