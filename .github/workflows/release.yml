@@ -63,7 +63,7 @@ jobs:
       # Fällt andernfalls sauber auf einen unsignierten Build zurück.
       # ------------------------------------------------------------------
       - name: Azure Login (optional, für Azure Trusted Signing)
-        if: ${{ vars.SIGNING_PROVIDER == 'azure' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ vars.SIGNING_PROVIDER == 'azure' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -71,7 +71,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign published binaries with Azure Trusted Signing (optional)
-        if: ${{ vars.SIGNING_PROVIDER == 'azure' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ vars.SIGNING_PROVIDER == 'azure' }}
         uses: azure/trusted-signing-action@v0.5.8
         with:
           endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
@@ -106,7 +106,7 @@ jobs:
             --outputDir "Releases"
 
       - name: Sign Velopack Setup.exe with Azure Trusted Signing (optional)
-        if: ${{ vars.SIGNING_PROVIDER == 'azure' && secrets.AZURE_CLIENT_ID != '' }}
+        if: ${{ vars.SIGNING_PROVIDER == 'azure' }}
         uses: azure/trusted-signing-action@v0.5.8
         with:
           endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
@@ -124,7 +124,7 @@ jobs:
       # hinterlegt sind. Details siehe README.md.
       # ------------------------------------------------------------------
       - name: Sign release artifact via SignPath.io (optional)
-        if: ${{ vars.SIGNING_PROVIDER == 'signpath' && secrets.SIGNPATH_API_TOKEN != '' }}
+        if: ${{ vars.SIGNING_PROVIDER == 'signpath' }}
         uses: signpath/github-action-submit-signing-request@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
