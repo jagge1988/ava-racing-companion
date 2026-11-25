@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AvaRacingCompanion.Core\AvaRacingCompanion.Core.csproj" />
     <ProjectReference Include="..\AvaRacingCompanion.Updater\AvaRacingCompanion.Updater.csproj" />
+    <ProjectReference Include="..\AvaRacingCompanion.Telemetry\AvaRacingCompanion.Telemetry.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,8 +1,10 @@
-# AvaRacingCompanion.Telemetry (Phase 2 Platzhalter)
+# AvaRacingCompanion.Telemetry
 
-Dieses Modul bleibt in **Phase 1** bewusst frei von iRacing-spezifischer Logik.
+60-Hz-Telemetrie- und Session-Modul für den AVA Racing Companion (0 externe NuGet-Pakete).
 
-Geplant für Phase 2:
-- Live-Auslesen des iRacing Shared-Memory SDKs (nur lesend, keine Eingriffe in iRacing)
-- Einlesen und Auswerten lokaler `.ibt`-Telemetriedateien
-- Saubere, typisierte Datenübertragung an unseren separaten Discord-Bot (ohne Secrets im Repository)
+## Enthaltene Komponenten
+- **Sdk (`IRacingMemoryMappedReader`, `SessionInfoYamlParser`, `TelemetryFrame`):** Rein lesender Zugriff auf das iRacing Shared-Memory SDK (`Local\IRSDKMemMapFileName`).
+- **Tracking (`TelemetrySessionTracker`, `TelemetryMath`):**
+  - Aktiver Fahrer (Practice, Quali & Race): Rundenzeiten, exakter Spritverbrauch, Reifensatz & -verschleiß (`LF/RF/LR/RR`), Boxenstopp-Standzeit, getankte Liter, Reifenwechsel-Bitmaske sowie volle **60-Hz-Traces** inkl. berechnetem **Slip Angle** ($\operatorname{atan2}(v_y, v_x)$).
+  - Race-Sessions zusätzlich: Feld-Tracking aller Fahrer (`CarIdxTireCompound`, `CarIdxOnPitRoad`, `CarIdxTrackSurface == InPitStall`) für `/pitstops`.
+- **Api (`TelemetryApiClient`, `OfflineUploadOutbox`):** HTTP-v1-Client inkl. `gzip`-Kompression für Traces und lokaler Offline-Retry-Queue in `%APPDATA%\AvaRacingCompanion\outbox\`.

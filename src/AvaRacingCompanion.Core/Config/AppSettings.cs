@@ -23,12 +23,15 @@ public enum UpdateBehavior
 
 /// <summary>
 /// Lokal gespeicherte Benutzereinstellungen (%APPDATA%\AvaRacingCompanion\settings.json).
+/// Enthält keine globalen Repository-Secrets; ein eventuelles DeviceToken gehört
+/// ausschließlich zum lokalen Benutzer nach /pair.
 /// </summary>
 public sealed record AppSettings
 {
     public const int MinUpdateCheckIntervalMinutes = 15;
     public const int MaxUpdateCheckIntervalMinutes = 1440;
     public const int DefaultUpdateCheckIntervalMinutes = 60;
+    public const string DefaultServerBaseUrl = "https://ava-racing-bot.tailed88f1.ts.net";
 
     public UpdateBehavior UpdateBehavior { get; init; } = UpdateBehavior.AutoUpdate;
 
@@ -42,6 +45,27 @@ public sealed record AppSettings
     /// </summary>
     public string? LastNotifiedVersion { get; init; }
 
+    /// <summary>
+    /// Basis-URL der Bot-Ingest-API (z. B. https://ava-racing-bot.tailed88f1.ts.net).
+    /// </summary>
+    public string ServerBaseUrl { get; init; } = DefaultServerBaseUrl;
+
+    /// <summary>
+    /// Persönliches Bearer-Token nach erfolgreichem /pair.
+    /// </summary>
+    public string? DeviceToken { get; init; }
+
+    public string? PairedDriverName { get; init; }
+
+    public int? PairedCustId { get; init; }
+
+    public bool TelemetryEnabled { get; init; } = true;
+
+    public bool UploadTracesEnabled { get; init; } = true;
+
+    [JsonIgnore]
+    public bool IsPaired => !string.IsNullOrWhiteSpace(DeviceToken);
+
     public AppSettings Normalized()
     {
         var clampedInterval = Math.Clamp(
@@ -53,10 +77,13 @@ public sealed record AppSettings
             ? UpdateBehavior
             : UpdateBehavior.AutoUpdate;
 
+        var normalizedUrl = (ServerBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+
         return this with
         {
             UpdateBehavior = behavior,
-            UpdateCheckIntervalMinutes = clampedInterval
+            UpdateCheckIntervalMinutes = clampedInterval,
+            ServerBaseUrl = normalizedUrl
         };
     }
 }

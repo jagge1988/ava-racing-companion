@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Windows;
 using AvaRacingCompanion.Core.Config;
 using AvaRacingCompanion.Core.Versioning;
+using AvaRacingCompanion.Telemetry;
+using AvaRacingCompanion.Telemetry.Api;
 using AvaRacingCompanion.Updater;
 
 namespace AvaRacingCompanion.App;
@@ -12,6 +14,9 @@ public partial class MainWindow : Window
     private readonly Action<AppSettings> _onSettingsChanged;
     private readonly Func<Task> _onManualUpdateCheckRequested;
     private readonly Action _onApplyUpdateNowRequested;
+    private readonly Func<string, Task<ApiCallResult>> _onTestConnectionRequested;
+    private readonly Func<string, string, Task<PairResult>> _onPairRequested;
+    private readonly Action _onUnpairRequested;
 
     private AppSettings _currentSettings;
     private string? _latestReleaseUrl;
@@ -22,7 +27,10 @@ public partial class MainWindow : Window
         AppSettings initialSettings,
         Action<AppSettings> onSettingsChanged,
         Func<Task> onManualUpdateCheckRequested,
-        Action onApplyUpdateNowRequested)
+        Action onApplyUpdateNowRequested,
+        Func<string, Task<ApiCallResult>> onTestConnectionRequested,
+        Func<string, string, Task<PairResult>> onPairRequested,
+        Action onUnpairRequested)
     {
         InitializeComponent();
 
@@ -30,11 +38,19 @@ public partial class MainWindow : Window
         _onSettingsChanged = onSettingsChanged;
         _onManualUpdateCheckRequested = onManualUpdateCheckRequested;
         _onApplyUpdateNowRequested = onApplyUpdateNowRequested;
+        _onTestConnectionRequested = onTestConnectionRequested;
+        _onPairRequested = onPairRequested;
+        _onUnpairRequested = onUnpairRequested;
 
         VersionText.Text = $"v{AppInfo.GetCurrentVersion()}";
         AutoUpdateRadio.IsChecked = initialSettings.UpdateBehavior == UpdateBehavior.AutoUpdate;
         NotifyOnlyRadio.IsChecked = initialSettings.UpdateBehavior == UpdateBehavior.NotifyOnly;
         AutostartCheckBox.IsChecked = initialSettings.LaunchAtStartup;
+
+        ServerUrlTextBox.Text = initialSettings.ServerBaseUrl;
+        TelemetryEnabledCheckBox.IsChecked = initialSettings.TelemetryEnabled;
+        UploadTracesCheckBox.IsChecked = initialSettings.UploadTracesEnabled;
+        RefreshPairingUi(initialSettings);
 
         _isInitializing = false;
     }
@@ -42,6 +58,40 @@ public partial class MainWindow : Window
     public void AllowActualClose()
     {
         _allowActualClose = true;
+    }
+
+    public void RefreshPairingUi(AppSettings settings)
+    {
+        _currentSettings = settings;
+        if (settings.IsPaired)
+        {
+            UnpairedPanel.Visibility = Visibility.Collapsed;
+            PairedPanel.Visibility = Visibility.Visible;
+            var driverLabel = string.IsNullOrWhiteSpace(settings.PairedDriverName)
+                ? "Discord-Konto"
+                : settings.PairedDriverName;
+            var custSuffix = settings.PairedCustId.HasValue ? $" (CustID {settings.PairedCustId.Value})" : string.Empty;
+            PairedDriverText.Text = $"Gekoppelt als {driverLabel}{custSuffix}";
+        }
+        else
+        {
+            PairedPanel.Visibility = Visibility.Collapsed;
+            UnpairedPanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    public void ApplyTelemetryStatus(TelemetryRuntimeStatus status)
+    {
+        TelemetryStatusText.Text = status.StatusText;
+        if (status.PendingUploads > 0)
+        {
+            PendingUploadsText.Text = $"{status.PendingUploads} offen";
+            PendingUploadsBadge.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            PendingUploadsBadge.Visibility = Visibility.Collapsed;
+        }
     }
 
     public void SetUpdateCheckingState()
@@ -91,19 +141,94 @@ public partial class MainWindow : Window
             return;
         }
 
+        PersistCurrentUiSettings();
+    }
+
+    private void OnServerUrlLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        PersistCurrentUiSettings();
+    }
+
+    private void PersistCurrentUiSettings()
+    {
         var behavior = NotifyOnlyRadio.IsChecked == true
             ? UpdateBehavior.NotifyOnly
             : UpdateBehavior.AutoUpdate;
 
-        var launchAtStartup = AutostartCheckBox.IsChecked == true;
-
         _currentSettings = _currentSettings with
         {
             UpdateBehavior = behavior,
-            LaunchAtStartup = launchAtStartup
+            LaunchAtStartup = AutostartCheckBox.IsChecked == true,
+            ServerBaseUrl = ServerUrlTextBox.Text ?? string.Empty,
+            TelemetryEnabled = TelemetryEnabledCheckBox.IsChecked == true,
+            UploadTracesEnabled = UploadTracesCheckBox.IsChecked == true
         };
 
         _onSettingsChanged(_currentSettings);
+    }
+
+    private async void OnTestConnectionClick(object sender, RoutedEventArgs e)
+    {
+        PersistCurrentUiSettings();
+        TestConnectionButton.IsEnabled = false;
+        ShowConnectionFeedback("Prüfe Verbindung zum Bot-Server ...");
+
+        try
+        {
+            var result = await _onTestConnectionRequested(ServerUrlTextBox.Text ?? string.Empty);
+            ShowConnectionFeedback(result.Success
+                ? "Verbindung erfolgreich! Bot-Ingest-API (v1) ist erreichbar."
+                : $"Verbindung fehlgeschlagen: {result.ErrorMessage}");
+        }
+        finally
+        {
+            TestConnectionButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnPairClick(object sender, RoutedEventArgs e)
+    {
+        PersistCurrentUiSettings();
+        PairButton.IsEnabled = false;
+        ShowConnectionFeedback("Tausche /pair-Code gegen persönliches Geräte-Token ...");
+
+        try
+        {
+            var result = await _onPairRequested(
+                ServerUrlTextBox.Text ?? string.Empty,
+                PairCodeTextBox.Text ?? string.Empty);
+
+            if (result.Success && result.Response is not null)
+            {
+                PairCodeTextBox.Text = string.Empty;
+                ShowConnectionFeedback($"Erfolgreich gekoppelt als {result.Response.DriverName}!");
+            }
+            else
+            {
+                ShowConnectionFeedback(result.ErrorMessage ?? "Kopplung fehlgeschlagen.");
+            }
+        }
+        finally
+        {
+            PairButton.IsEnabled = true;
+        }
+    }
+
+    private void OnUnpairClick(object sender, RoutedEventArgs e)
+    {
+        _onUnpairRequested();
+        ShowConnectionFeedback("Lokales Geräte-Token entfernt. Bei Bedarf zusätzlich /unpair im Discord nutzen.");
+    }
+
+    private void ShowConnectionFeedback(string message)
+    {
+        ConnectionFeedbackText.Text = message;
+        ConnectionFeedbackText.Visibility = Visibility.Visible;
     }
 
     private async void OnCheckUpdatesClick(object sender, RoutedEventArgs e)

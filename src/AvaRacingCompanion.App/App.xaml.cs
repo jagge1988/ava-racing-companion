@@ -4,6 +4,8 @@ using AvaRacingCompanion.App.Services;
 using AvaRacingCompanion.App.Tray;
 using AvaRacingCompanion.Core.Config;
 using AvaRacingCompanion.Core.Services;
+using AvaRacingCompanion.Telemetry;
+using AvaRacingCompanion.Telemetry.Api;
 using AvaRacingCompanion.Updater;
 using WpfApplication = System.Windows.Application;
 
@@ -15,6 +17,8 @@ public partial class App : WpfApplication
     private readonly SettingsStore _settingsStore = new();
     private readonly IAutostartService _autostartService = new WindowsAutostartService();
     private readonly IUpdateService _updateService = new VelopackUpdateService();
+    private readonly TelemetryApiClient _telemetryApiClient = new();
+    private readonly TelemetryCoordinator _telemetryCoordinator;
 
     private AppSettings _settings = new();
     private TrayIconManager? _trayIcon;
@@ -25,6 +29,7 @@ public partial class App : WpfApplication
     public App(bool startMinimized = false)
     {
         _startMinimized = startMinimized;
+        _telemetryCoordinator = new TelemetryCoordinator(apiClient: _telemetryApiClient);
     }
 
     protected override void OnStartup(StartupEventArgs e)
@@ -50,7 +55,19 @@ public partial class App : WpfApplication
             initialSettings: _settings,
             onSettingsChanged: HandleSettingsChanged,
             onManualUpdateCheckRequested: () => RunUpdateCheckAsync(isManual: true),
-            onApplyUpdateNowRequested: ApplyUpdateAndRestart);
+            onApplyUpdateNowRequested: ApplyUpdateAndRestart,
+            onTestConnectionRequested: url => _telemetryApiClient.CheckHealthAsync(url),
+            onPairRequested: HandlePairRequestedAsync,
+            onUnpairRequested: HandleUnpairRequested);
+
+        _telemetryCoordinator.StatusChanged += status =>
+        {
+            if (!_isExiting)
+            {
+                Dispatcher.Invoke(() => _mainWindow?.ApplyTelemetryStatus(status));
+            }
+        };
+        _telemetryCoordinator.Start(_settings);
 
         if (!_startMinimized)
         {
@@ -86,6 +103,7 @@ public partial class App : WpfApplication
         var previousAutostart = _settings.LaunchAtStartup;
         _settings = updatedSettings.Normalized();
         _settingsStore.Save(_settings);
+        _telemetryCoordinator.UpdateSettings(_settings);
 
         if (previousAutostart != _settings.LaunchAtStartup)
         {
@@ -96,6 +114,45 @@ public partial class App : WpfApplication
         {
             _updateTimer.Interval = TimeSpan.FromMinutes(_settings.UpdateCheckIntervalMinutes);
         }
+    }
+
+    private async Task<PairResult> HandlePairRequestedAsync(string serverUrl, string code)
+    {
+        var result = await _telemetryApiClient.ExchangePairingCodeAsync(
+            serverUrl,
+            code,
+            Environment.MachineName);
+
+        if (result.Success && result.Response is not null)
+        {
+            _settings = (_settings with
+            {
+                ServerBaseUrl = serverUrl,
+                DeviceToken = result.Response.Token,
+                PairedDriverName = result.Response.DriverName,
+                PairedCustId = result.Response.CustId
+            }).Normalized();
+
+            _settingsStore.Save(_settings);
+            _telemetryCoordinator.UpdateSettings(_settings);
+            _mainWindow?.RefreshPairingUi(_settings);
+        }
+
+        return result;
+    }
+
+    private void HandleUnpairRequested()
+    {
+        _settings = (_settings with
+        {
+            DeviceToken = null,
+            PairedDriverName = null,
+            PairedCustId = null
+        }).Normalized();
+
+        _settingsStore.Save(_settings);
+        _telemetryCoordinator.UpdateSettings(_settings);
+        _mainWindow?.RefreshPairingUi(_settings);
     }
 
     private void StartPeriodicUpdateChecks()
@@ -171,6 +228,7 @@ public partial class App : WpfApplication
 
         _isExiting = true;
         _updateTimer?.Stop();
+        _telemetryCoordinator.Dispose();
         _trayIcon?.Dispose();
         _updateService.ApplyPendingUpdateAndRestart();
     }
@@ -184,6 +242,7 @@ public partial class App : WpfApplication
 
         _isExiting = true;
         _updateTimer?.Stop();
+        _telemetryCoordinator.Dispose();
 
         if (_updateService.HasPendingUpdate)
         {
