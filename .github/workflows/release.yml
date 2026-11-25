@@ -1,0 +1,173 @@
+name: Release (Windows Installer & Velopack)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Manuelle Test-Version ohne Tag (z. B. 0.1.0-test.1)'
+        required: true
+        default: '0.1.0-test.1'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Determine release version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}" -replace '^v', ''
+            $isTagRelease = "false"
+          } else {
+            $version = "${{ github.ref_name }}" -replace '^v', ''
+            $isTagRelease = "true"
+          }
+          echo "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          echo "IS_TAG_RELEASE=$isTagRelease" >> $env:GITHUB_ENV
+          Write-Host "Building AVA Racing Companion v$version (Tag-Release: $isTagRelease)"
+
+      - name: Run unit tests
+        run: dotnet test AvaRacingCompanion.sln -c Release
+
+      - name: Publish self-contained Windows app (win-x64)
+        run: |
+          dotnet publish src/AvaRacingCompanion.App/AvaRacingCompanion.App.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:Version=${{ env.RELEASE_VERSION }} `
+            -p:PublishReadyToRun=false `
+            -o publish
+
+      # ------------------------------------------------------------------
+      # Optionales Windows Code Signing (Azure Trusted Signing)
+      # Aktiv, sobald die Repository-Variable SIGNING_PROVIDER=azure und
+      # die entsprechenden GitHub Secrets hinterlegt sind.
+      # Fällt andernfalls sauber auf einen unsignierten Build zurück.
+      # ------------------------------------------------------------------
+      - name: Azure Login (optional, für Azure Trusted Signing)
+        if: ${{ vars.SIGNING_PROVIDER == 'azure' && secrets.AZURE_CLIENT_ID != '' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign published binaries with Azure Trusted Signing (optional)
+        if: ${{ vars.SIGNING_PROVIDER == 'azure' && secrets.AZURE_CLIENT_ID != '' }}
+        uses: azure/trusted-signing-action@v0.5.8
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: publish
+          files-folder-filter: AvaRacingCompanion.exe,AvaRacingCompanion.*.dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Unsigned build notice
+        if: ${{ vars.SIGNING_PROVIDER != 'azure' && vars.SIGNING_PROVIDER != 'signpath' }}
+        shell: pwsh
+        run: |
+          Write-Host "::notice::Kein Code-Signing-Provider konfiguriert (vars.SIGNING_PROVIDER). Es wird ein unsignierter Build erzeugt."
+
+      - name: Install Velopack CLI (vpk)
+        run: dotnet tool install --global vpk --version 1.2.161
+
+      - name: Pack installer & Velopack update package
+        shell: pwsh
+        run: |
+          vpk pack `
+            --packId "AvaRacingCompanion" `
+            --packTitle "AVA Racing Companion" `
+            --packAuthors "AVA Racing" `
+            --packVersion "${{ env.RELEASE_VERSION }}" `
+            --packDir "publish" `
+            --mainExe "AvaRacingCompanion.exe" `
+            --icon "src/AvaRacingCompanion.App/Assets/app.ico" `
+            --outputDir "Releases"
+
+      - name: Sign Velopack Setup.exe with Azure Trusted Signing (optional)
+        if: ${{ vars.SIGNING_PROVIDER == 'azure' && secrets.AZURE_CLIENT_ID != '' }}
+        uses: azure/trusted-signing-action@v0.5.8
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          files-folder: Releases
+          files-folder-filter: '*-Setup.exe'
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # ------------------------------------------------------------------
+      # Optionales Windows Code Signing via SignPath.io (Open-Source-Option)
+      # Aktiv, sobald SIGNING_PROVIDER=signpath und SIGNPATH_API_TOKEN
+      # hinterlegt sind. Details siehe README.md.
+      # ------------------------------------------------------------------
+      - name: Sign release artifact via SignPath.io (optional)
+        if: ${{ vars.SIGNING_PROVIDER == 'signpath' && secrets.SIGNPATH_API_TOKEN != '' }}
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          input-artifact-path: Releases/AvaRacingCompanion-win-Setup.exe
+          output-artifact-path: Releases/AvaRacingCompanion-win-Setup.exe
+          wait-for-completion: true
+
+      - name: Generate SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Path "Releases" -File | Sort-Object Name
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content -Path "Releases/SHA256SUMS.txt" -Encoding utf8NoBOM
+          Get-Content "Releases/SHA256SUMS.txt"
+
+      - name: Attest Build Provenance (SLSA / GitHub Attestation)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            Releases/*-Setup.exe
+            Releases/*.nupkg
+            Releases/releases.win.json
+            Releases/SHA256SUMS.txt
+
+      - name: Upload workflow artifacts (for manual workflow_dispatch runs)
+        if: ${{ env.IS_TAG_RELEASE != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ava-racing-companion-${{ env.RELEASE_VERSION }}
+          path: Releases/*
+
+      - name: Publish GitHub Release
+        if: ${{ env.IS_TAG_RELEASE == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            Releases/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

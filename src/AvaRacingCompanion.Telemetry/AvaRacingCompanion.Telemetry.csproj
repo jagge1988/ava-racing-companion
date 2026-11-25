@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>AvaRacingCompanion.Telemetry</RootNamespace>
+    <AssemblyName>AvaRacingCompanion.Telemetry</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AvaRacingCompanion.Core\AvaRacingCompanion.Core.csproj" />
+  </ItemGroup>
+</Project>

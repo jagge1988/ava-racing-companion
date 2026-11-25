@@ -1,0 +1,45 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.10.35027.167
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaRacingCompanion.Core", "src\AvaRacingCompanion.Core\AvaRacingCompanion.Core.csproj", "{A1B2C3D4-1111-4A01-9001-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaRacingCompanion.Updater", "src\AvaRacingCompanion.Updater\AvaRacingCompanion.Updater.csproj", "{A1B2C3D4-2222-4A02-9002-000000000002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaRacingCompanion.Telemetry", "src\AvaRacingCompanion.Telemetry\AvaRacingCompanion.Telemetry.csproj", "{A1B2C3D4-3333-4A03-9003-000000000003}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaRacingCompanion.App", "src\AvaRacingCompanion.App\AvaRacingCompanion.App.csproj", "{A1B2C3D4-4444-4A04-9004-000000000004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaRacingCompanion.Core.Tests", "tests\AvaRacingCompanion.Core.Tests\AvaRacingCompanion.Core.Tests.csproj", "{A1B2C3D4-5555-4A05-9005-000000000005}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A1B2C3D4-1111-4A01-9001-000000000001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-1111-4A01-9001-000000000001}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-1111-4A01-9001-000000000001}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-1111-4A01-9001-000000000001}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-2222-4A02-9002-000000000002}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-2222-4A02-9002-000000000002}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-2222-4A02-9002-000000000002}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-2222-4A02-9002-000000000002}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-3333-4A03-9003-000000000003}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-3333-4A03-9003-000000000003}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-3333-4A03-9003-000000000003}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-3333-4A03-9003-000000000003}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-4444-4A04-9004-000000000004}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-4444-4A04-9004-000000000004}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-4444-4A04-9004-000000000004}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-4444-4A04-9004-000000000004}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-5555-4A05-9005-000000000005}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-5555-4A05-9005-000000000005}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-5555-4A05-9005-000000000005}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-5555-4A05-9005-000000000005}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
