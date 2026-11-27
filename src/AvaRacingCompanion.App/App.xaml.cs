@@ -3,7 +3,9 @@ using System.Windows.Threading;
 using AvaRacingCompanion.App.Services;
 using AvaRacingCompanion.App.Tray;
 using AvaRacingCompanion.Core.Config;
+using AvaRacingCompanion.Core.Logging;
 using AvaRacingCompanion.Core.Services;
+using AvaRacingCompanion.Core.Versioning;
 using AvaRacingCompanion.Telemetry;
 using AvaRacingCompanion.Telemetry.Api;
 using AvaRacingCompanion.Updater;
@@ -38,6 +40,19 @@ public partial class App : WpfApplication
     {
         base.OnStartup(e);
 
+        AppLogger.Shared.Info("App", $"Starte {AppInfo.DisplayName} v{AppInfo.GetCurrentVersion()} (minimized={_startMinimized})");
+        DispatcherUnhandledException += (_, args) =>
+        {
+            AppLogger.Shared.Error("App", "Unbehandelte UI-Exception", args.Exception);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception ex)
+            {
+                AppLogger.Shared.Error("App", "Unbehandelte AppDomain-Exception", ex);
+            }
+        };
+
         _settings = _settingsStore.Load();
         _deviceToken = _tokenStore.LoadToken();
 
@@ -67,6 +82,7 @@ public partial class App : WpfApplication
         _trayIcon = new TrayIconManager();
         _trayIcon.OpenRequested += (_, _) => ShowMainWindow();
         _trayIcon.CheckForUpdatesRequested += async (_, _) => await RunUpdateCheckAsync(isManual: true);
+        _trayIcon.OpenLogsRequested += (_, _) => AvaRacingCompanion.App.MainWindow.OpenLogLocation();
         _trayIcon.ExitRequested += (_, _) => ExitApplication();
 
         _mainWindow = new MainWindow(

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AvaRacingCompanion.Core.Logging;
 using AvaRacingCompanion.Core.Versioning;
 
 namespace AvaRacingCompanion.Telemetry.Api;
@@ -127,16 +128,19 @@ public sealed class OfflineUploadOutbox
                 {
                     SafeDelete(file);
                     sentCount++;
+                    AppLogger.Shared.Info("Upload", $"OK {item.EndpointPath} (gzip={item.Gzip}, HTTP {result.StatusCode})");
                 }
                 else if (result.IsAuthError)
                 {
                     // Token ungültig/widerrufen (z. B. /unpair): Dateien behalten, UI informieren
+                    AppLogger.Shared.Warn("Upload", $"Auth-Fehler bei {item.EndpointPath} (HTTP {result.StatusCode}) – Token widerrufen.");
                     authRevoked = true;
                     break;
                 }
                 else
                 {
                     // Netzwerk/Server temporär nicht erreichbar: FIFO beibehalten und später erneut versuchen
+                    AppLogger.Shared.Warn("Upload", $"Fehlgeschlagen bei {item.EndpointPath} (HTTP {result.StatusCode}): {result.ErrorMessage}");
                     break;
                 }
             }

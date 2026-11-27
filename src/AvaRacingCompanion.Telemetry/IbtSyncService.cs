@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AvaRacingCompanion.Core.Logging;
 using AvaRacingCompanion.Core.Versioning;
 using AvaRacingCompanion.Telemetry.Api;
 using AvaRacingCompanion.Telemetry.Sdk;
@@ -113,6 +114,7 @@ public sealed class IbtSyncService
                 var enqueuedForFile = ProcessSingleIbtFile(file, outbox, uploadTracesEnabled, pairedCustId, cancellationToken);
                 enqueuedCount += enqueuedForFile;
                 processedCount++;
+                AppLogger.Shared.Info("IBT", $"Verarbeitet: {info.Name} ({info.Length:N0} Bytes) -> {enqueuedForFile} Upload-Paket(e).");
 
                 _processedKeys.Add(key);
                 SaveProcessedKeys();
@@ -121,9 +123,10 @@ public sealed class IbtSyncService
             {
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
                 // Beschädigte/unvollständige Datei überspringen, ohne den restlichen Scan abzubrechen
+                AppLogger.Shared.Error("IBT", $"Fehler beim Lesen von {info.Name}", ex);
                 skippedCount++;
             }
         }

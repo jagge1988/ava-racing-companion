@@ -326,14 +326,18 @@
                    Foreground="#748299"
                    VerticalAlignment="Center" />
 
-        <TextBlock DockPanel.Dock="Right"
-                   HorizontalAlignment="Right"
-                   FontSize="11.5"
-                   VerticalAlignment="Center">
-          <Hyperlink Click="OnOpenAllReleasesClick" Foreground="#60A5FA">
-            GitHub Releases
-          </Hyperlink>
-        </TextBlock>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock FontSize="11.5" Margin="0,0,12,0">
+            <Hyperlink Click="OnOpenLogClick" Foreground="#60A5FA">
+              Log öffnen
+            </Hyperlink>
+          </TextBlock>
+          <TextBlock FontSize="11.5">
+            <Hyperlink Click="OnOpenAllReleasesClick" Foreground="#60A5FA">
+              GitHub Releases
+            </Hyperlink>
+          </TextBlock>
+        </StackPanel>
       </DockPanel>
     </Grid>
   </ScrollViewer>

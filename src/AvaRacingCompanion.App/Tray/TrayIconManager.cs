@@ -17,6 +17,7 @@ public sealed class TrayIconManager : IDisposable
 
     public event EventHandler? OpenRequested;
     public event EventHandler? CheckForUpdatesRequested;
+    public event EventHandler? OpenLogsRequested;
     public event EventHandler? ExitRequested;
 
     public TrayIconManager()
@@ -26,6 +27,7 @@ public sealed class TrayIconManager : IDisposable
         var menu = new WinForms.ContextMenuStrip();
         menu.Items.Add("Öffnen", null, (_, _) => OpenRequested?.Invoke(this, EventArgs.Empty));
         menu.Items.Add("Auf Updates prüfen", null, (_, _) => CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty));
+        menu.Items.Add("Log-Ordner öffnen", null, (_, _) => OpenLogsRequested?.Invoke(this, EventArgs.Empty));
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add("Beenden", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
 

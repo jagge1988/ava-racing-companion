@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using AvaRacingCompanion.Core.Config;
+using AvaRacingCompanion.Core.Logging;
 using AvaRacingCompanion.Core.Versioning;
 using AvaRacingCompanion.Telemetry;
 using AvaRacingCompanion.Telemetry.Api;
@@ -271,6 +273,28 @@ public partial class MainWindow : Window
     private void OnOpenAllReleasesClick(object sender, RoutedEventArgs e)
     {
         OpenUrl(AppInfo.GitHubReleasesUrl);
+    }
+
+    private void OnOpenLogClick(object sender, RoutedEventArgs e)
+    {
+        OpenLogLocation();
+    }
+
+    public static void OpenLogLocation()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppLogger.Shared.LogDirectory);
+            var target = File.Exists(AppLogger.Shared.LogFilePath)
+                ? AppLogger.Shared.LogFilePath
+                : AppLogger.Shared.LogDirectory;
+
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Ignorieren
+        }
     }
 
     private static void OpenUrl(string url)

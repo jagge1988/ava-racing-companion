@@ -1,4 +1,5 @@
 using AvaRacingCompanion.Core.Config;
+using AvaRacingCompanion.Core.Logging;
 using AvaRacingCompanion.Telemetry.Api;
 using AvaRacingCompanion.Telemetry.Sdk;
 using AvaRacingCompanion.Telemetry.Tracking;
@@ -158,7 +159,9 @@ public sealed class TelemetryCoordinator : IDisposable
             var frame = _sdkReader.TryReadNextFrame(out var metadataUpdated);
             if (metadataUpdated)
             {
-                _tracker.UpdateMetadata(_sdkReader.CurrentMetadata);
+                var m = _sdkReader.CurrentMetadata;
+                AppLogger.Shared.Info("SDK", $"Session geladen: SubSession={m.SubsessionId}, Track={m.TrackDisplayName} ({m.TrackId}), PlayerCustId={m.PlayerCustId}, Spectator={m.IsPlayerSpectator}");
+                _tracker.UpdateMetadata(m);
             }
 
             if (frame is not null)
