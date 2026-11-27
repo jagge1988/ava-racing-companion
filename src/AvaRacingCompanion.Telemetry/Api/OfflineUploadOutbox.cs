@@ -9,6 +9,10 @@ public sealed record OutboxItem(
     bool Gzip,
     DateTimeOffset CreatedAtUtc);
 
+public sealed record OutboxFlushResult(
+    int SentCount,
+    bool AuthRevoked);
+
 /// <summary>
 /// Persistente Offline-Queue (%APPDATA%\AvaRacingCompanion\outbox\), damit bei
 /// kurzzeitigem Verbindungsabbruch keine Runden-, Pitstop- oder Trace-Daten verloren gehen.
@@ -65,7 +69,7 @@ public sealed class OfflineUploadOutbox
         File.Move(tempPath, targetPath, overwrite: true);
     }
 
-    public async Task<int> FlushAsync(
+    public async Task<OutboxFlushResult> FlushAsync(
         TelemetryApiClient client,
         string serverBaseUrl,
         string? deviceToken,
@@ -73,12 +77,12 @@ public sealed class OfflineUploadOutbox
     {
         if (string.IsNullOrWhiteSpace(serverBaseUrl) || string.IsNullOrWhiteSpace(deviceToken))
         {
-            return 0;
+            return new OutboxFlushResult(0, false);
         }
 
         if (!Directory.Exists(_directoryPath))
         {
-            return 0;
+            return new OutboxFlushResult(0, false);
         }
 
         await _flushLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -89,6 +93,7 @@ public sealed class OfflineUploadOutbox
                 .ToArray();
 
             var sentCount = 0;
+            var authRevoked = false;
             foreach (var file in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -125,7 +130,8 @@ public sealed class OfflineUploadOutbox
                 }
                 else if (result.IsAuthError)
                 {
-                    // Token ungültig/widerrufen: Dateien behalten, aber aktuellen Flush sofort abbrechen
+                    // Token ungültig/widerrufen (z. B. /unpair): Dateien behalten, UI informieren
+                    authRevoked = true;
                     break;
                 }
                 else
@@ -135,7 +141,7 @@ public sealed class OfflineUploadOutbox
                 }
             }
 
-            return sentCount;
+            return new OutboxFlushResult(sentCount, authRevoked);
         }
         finally
         {

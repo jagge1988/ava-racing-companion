@@ -53,6 +53,7 @@ public sealed class IRacingVarTable
         {
             TickCount = tickCount,
             IsOnTrack = ReadBool(buffer, "IsOnTrack"),
+            IsReplayPlaying = ReadBool(buffer, "IsReplayPlaying"),
             SessionTimeSeconds = ReadDouble(buffer, "SessionTime"),
             SessionNum = ReadInt(buffer, "SessionNum"),
             Lap = ReadInt(buffer, "Lap"),

@@ -51,8 +51,10 @@ public sealed record AppSettings
     public string ServerBaseUrl { get; init; } = DefaultServerBaseUrl;
 
     /// <summary>
-    /// Persönliches Bearer-Token nach erfolgreichem /pair.
+    /// Nur für einmalige Migration aus v0.2.0/v0.2.1; produktiv wird das Token
+    /// ausschließlich verschlüsselt über Windows DPAPI (device_token.dpapi) gespeichert.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DeviceToken { get; init; }
 
     public string? PairedDriverName { get; init; }
@@ -76,7 +78,7 @@ public sealed record AppSettings
     public string IbtFolderPath { get; init; } = string.Empty;
 
     [JsonIgnore]
-    public bool IsPaired => !string.IsNullOrWhiteSpace(DeviceToken);
+    public bool IsPaired => PairedCustId.HasValue || !string.IsNullOrWhiteSpace(DeviceToken);
 
     public AppSettings Normalized()
     {

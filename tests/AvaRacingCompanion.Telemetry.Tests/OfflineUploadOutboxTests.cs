@@ -32,9 +32,10 @@ public sealed class OfflineUploadOutboxTests : IDisposable
         using var httpClient = new HttpClient(handler);
         using var apiClient = new TelemetryApiClient(httpClient);
 
-        var sent = await outbox.FlushAsync(apiClient, "https://bot.example.ts.net", "secret-token");
+        var flush = await outbox.FlushAsync(apiClient, "https://bot.example.ts.net", "secret-token");
 
-        Assert.Equal(2, sent);
+        Assert.Equal(2, flush.SentCount);
+        Assert.False(flush.AuthRevoked);
         Assert.Equal(0, outbox.PendingCount);
         Assert.Equal("/api/v1/telemetry/laps", received[0].Path);
         Assert.False(received[0].IsGzip);
@@ -53,9 +54,27 @@ public sealed class OfflineUploadOutboxTests : IDisposable
         using var httpClient = new HttpClient(handler);
         using var apiClient = new TelemetryApiClient(httpClient);
 
-        var sent = await outbox.FlushAsync(apiClient, "https://bot.example.ts.net", "secret-token");
+        var flush = await outbox.FlushAsync(apiClient, "https://bot.example.ts.net", "secret-token");
 
-        Assert.Equal(0, sent);
+        Assert.Equal(0, flush.SentCount);
+        Assert.False(flush.AuthRevoked);
+        Assert.Equal(1, outbox.PendingCount);
+    }
+
+    [Fact]
+    public async Task FlushAsync_ReportsAuthRevokedOn401AndKeepsItems()
+    {
+        var outbox = new OfflineUploadOutbox(_tempDir);
+        outbox.Enqueue("/api/v1/telemetry/laps", new { subsession_id = 1 }, gzip: false);
+
+        using var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new TelemetryApiClient(httpClient);
+
+        var flush = await outbox.FlushAsync(apiClient, "https://bot.example.ts.net", "revoked-token");
+
+        Assert.Equal(0, flush.SentCount);
+        Assert.True(flush.AuthRevoked);
         Assert.Equal(1, outbox.PendingCount);
     }
 

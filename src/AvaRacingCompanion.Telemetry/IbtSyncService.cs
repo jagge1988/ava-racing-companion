@@ -54,6 +54,7 @@ public sealed class IbtSyncService
         string? customFolderPath,
         OfflineUploadOutbox outbox,
         bool uploadTracesEnabled,
+        int? pairedCustId = null,
         Action<string>? onProgress = null,
         CancellationToken cancellationToken = default)
     {
@@ -109,7 +110,7 @@ public sealed class IbtSyncService
             try
             {
                 onProgress?.Invoke($"Verarbeite .ibt-Datei: {info.Name} ...");
-                var enqueuedForFile = ProcessSingleIbtFile(file, outbox, uploadTracesEnabled, cancellationToken);
+                var enqueuedForFile = ProcessSingleIbtFile(file, outbox, uploadTracesEnabled, pairedCustId, cancellationToken);
                 enqueuedCount += enqueuedForFile;
                 processedCount++;
 
@@ -134,6 +135,7 @@ public sealed class IbtSyncService
         string filePath,
         OfflineUploadOutbox outbox,
         bool uploadTracesEnabled,
+        int? pairedCustId,
         CancellationToken cancellationToken)
     {
         var tracker = new TelemetrySessionTracker
@@ -142,14 +144,10 @@ public sealed class IbtSyncService
         };
 
         var enqueued = 0;
-        var metadataApplied = false;
+        var metadata = SessionMetadata.Empty();
 
-        // Erst Metadaten lesen und direkt alle Frames streamen
         using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
 
-        // Header + Metadata + Frames über ReadStreaming verarbeiten
-        // Hinweis: ReadStreaming parst Metadata vor dem ersten onFrame-Aufruf;
-        // wir nutzen einen kleinen Wrapper, um Metadata einmalig am Tracker zu setzen.
         var headerBuf = new byte[144];
         if (stream.Read(headerBuf, 0, headerBuf.Length) < 144)
         {
@@ -164,9 +162,19 @@ public sealed class IbtSyncService
             var read = stream.Read(yamlBytes, 0, yamlBytes.Length);
             var zeroIdx = Array.IndexOf(yamlBytes, (byte)0, 0, read);
             var yaml = System.Text.Encoding.Latin1.GetString(yamlBytes, 0, zeroIdx >= 0 ? zeroIdx : read);
-            tracker.UpdateMetadata(SessionInfoYamlParser.Parse(yaml));
-            metadataApplied = true;
+            metadata = SessionInfoYamlParser.Parse(yaml);
+            tracker.UpdateMetadata(metadata);
         }
+
+        if (metadata.SubsessionId <= 0)
+        {
+            return 0;
+        }
+
+        // Account- & Spectator-Schutz: Persönliche Daten (laps/pitstops/trace) nur hochladen,
+        // wenn der Fahrer in der .ibt mit dem gekoppelten Account übereinstimmt.
+        var allowPersonalUploads = !metadata.IsPlayerSpectator &&
+            (!pairedCustId.HasValue || metadata.PlayerCustId == pairedCustId.Value);
 
         stream.Seek(0, SeekOrigin.Begin);
 
@@ -174,28 +182,26 @@ public sealed class IbtSyncService
             stream,
             frame =>
             {
-                if (!metadataApplied)
-                {
-                    return;
-                }
-
                 var batch = tracker.ProcessFrame(frame);
-                if (batch.LapsUpload is not null)
+                if (allowPersonalUploads && !frame.IsReplayPlaying)
                 {
-                    outbox.Enqueue("/api/v1/telemetry/laps", batch.LapsUpload, gzip: false);
-                    enqueued++;
-                }
+                    if (batch.LapsUpload is not null)
+                    {
+                        outbox.Enqueue("/api/v1/telemetry/laps", batch.LapsUpload, gzip: false);
+                        enqueued++;
+                    }
 
-                if (batch.PitstopsUpload is not null)
-                {
-                    outbox.Enqueue("/api/v1/telemetry/pitstops", batch.PitstopsUpload, gzip: false);
-                    enqueued++;
-                }
+                    if (batch.PitstopsUpload is not null)
+                    {
+                        outbox.Enqueue("/api/v1/telemetry/pitstops", batch.PitstopsUpload, gzip: false);
+                        enqueued++;
+                    }
 
-                if (batch.TraceUpload is not null)
-                {
-                    outbox.Enqueue("/api/v1/telemetry/trace", batch.TraceUpload, gzip: true);
-                    enqueued++;
+                    if (batch.TraceUpload is not null)
+                    {
+                        outbox.Enqueue("/api/v1/telemetry/trace", batch.TraceUpload, gzip: true);
+                        enqueued++;
+                    }
                 }
 
                 if (batch.RaceFieldUpload is not null)

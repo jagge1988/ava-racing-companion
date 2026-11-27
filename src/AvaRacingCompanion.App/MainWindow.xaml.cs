@@ -26,6 +26,7 @@ public partial class MainWindow : Window
 
     public MainWindow(
         AppSettings initialSettings,
+        bool isPaired,
         Action<AppSettings> onSettingsChanged,
         Func<Task> onManualUpdateCheckRequested,
         Action onApplyUpdateNowRequested,
@@ -54,7 +55,7 @@ public partial class MainWindow : Window
         TelemetryEnabledCheckBox.IsChecked = initialSettings.TelemetryEnabled;
         UploadTracesCheckBox.IsChecked = initialSettings.UploadTracesEnabled;
         ImportIbtCheckBox.IsChecked = initialSettings.ImportIbtFilesEnabled;
-        RefreshPairingUi(initialSettings);
+        RefreshPairingUi(initialSettings, isPaired);
 
         _isInitializing = false;
     }
@@ -64,10 +65,10 @@ public partial class MainWindow : Window
         _allowActualClose = true;
     }
 
-    public void RefreshPairingUi(AppSettings settings)
+    public void RefreshPairingUi(AppSettings settings, bool isPaired)
     {
         _currentSettings = settings;
-        if (settings.IsPaired)
+        if (isPaired)
         {
             UnpairedPanel.Visibility = Visibility.Collapsed;
             PairedPanel.Visibility = Visibility.Visible;
@@ -82,6 +83,11 @@ public partial class MainWindow : Window
             PairedPanel.Visibility = Visibility.Collapsed;
             UnpairedPanel.Visibility = Visibility.Visible;
         }
+    }
+
+    public void ShowAuthRevokedWarning()
+    {
+        ShowConnectionFeedback("Token widerrufen (HTTP 401 – z. B. per /unpair). Bitte mit neuem /pair-Code neu koppeln.");
     }
 
     public void ApplyTelemetryStatus(TelemetryRuntimeStatus status)

@@ -9,7 +9,8 @@ public sealed record SessionDriverInfo(
     string UserName,
     string CarNumber,
     int CarId,
-    bool IsPaceCar);
+    bool IsPaceCar,
+    bool IsSpectator = false);
 
 public sealed record SessionMetadata(
     int SubsessionId,
@@ -22,6 +23,12 @@ public sealed record SessionMetadata(
     IReadOnlyDictionary<int, string> TireCompoundsByIndex,
     IReadOnlyDictionary<int, SessionDriverInfo> DriversByCarIdx)
 {
+    public int PlayerCustId =>
+        DriversByCarIdx.TryGetValue(PlayerCarIdx, out var drv) ? drv.CustId : 0;
+
+    public bool IsPlayerSpectator =>
+        !DriversByCarIdx.TryGetValue(PlayerCarIdx, out var drv) || drv.IsSpectator || drv.IsPaceCar || drv.CustId <= 0;
+
     public string ResolveSessionType(int sessionNum) =>
         SessionTypesByNum.TryGetValue(sessionNum, out var type) ? type : "Unknown";
 
@@ -73,6 +80,7 @@ public static partial class SessionInfoYamlParser
         var drvCarNumber = string.Empty;
         var drvCarId = 0;
         var drvIsPaceCar = false;
+        var drvIsSpectator = false;
 
         void FlushDriver()
         {
@@ -84,7 +92,8 @@ public static partial class SessionInfoYamlParser
                     drvUserName,
                     drvCarNumber,
                     drvCarId,
-                    drvIsPaceCar);
+                    drvIsPaceCar,
+                    drvIsSpectator);
             }
 
             drvCarIdx = null;
@@ -93,6 +102,7 @@ public static partial class SessionInfoYamlParser
             drvCarNumber = string.Empty;
             drvCarId = 0;
             drvIsPaceCar = false;
+            drvIsSpectator = false;
         }
 
         using var reader = new StringReader(yaml);
@@ -191,6 +201,7 @@ public static partial class SessionInfoYamlParser
                     case "CarNumber": drvCarNumber = v; break;
                     case "CarID": drvCarId = ParseInt(v); break;
                     case "CarIsPaceCar": drvIsPaceCar = v == "1"; break;
+                    case "IsSpectator": drvIsSpectator = v == "1"; break;
                 }
             }
         }

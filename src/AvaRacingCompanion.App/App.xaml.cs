@@ -15,12 +15,14 @@ public partial class App : WpfApplication
 {
     private readonly bool _startMinimized;
     private readonly SettingsStore _settingsStore = new();
+    private readonly ISecureTokenStore _tokenStore = new WindowsDpapiTokenStore();
     private readonly IAutostartService _autostartService = new WindowsAutostartService();
     private readonly IUpdateService _updateService = new VelopackUpdateService();
     private readonly TelemetryApiClient _telemetryApiClient = new();
     private readonly TelemetryCoordinator _telemetryCoordinator;
 
     private AppSettings _settings = new();
+    private string? _deviceToken;
     private TrayIconManager? _trayIcon;
     private MainWindow? _mainWindow;
     private DispatcherTimer? _updateTimer;
@@ -37,8 +39,24 @@ public partial class App : WpfApplication
         base.OnStartup(e);
 
         _settings = _settingsStore.Load();
+        _deviceToken = _tokenStore.LoadToken();
 
-        // Registry-Status mit gespeicherter Einstellung abgleichen
+        // Einmalige Migration aus v0.2.0/v0.2.1: Klartext-Token aus settings.json in DPAPI verschieben
+        if (!string.IsNullOrWhiteSpace(_settings.DeviceToken))
+        {
+            _deviceToken = _settings.DeviceToken;
+            _tokenStore.SaveToken(_deviceToken);
+            _settings = _settings with { DeviceToken = null };
+            _settingsStore.Save(_settings);
+        }
+
+        // Konsistenz: Falls kein DPAPI-Token mehr existiert, Pairing-Metadaten bereinigen
+        if (string.IsNullOrWhiteSpace(_deviceToken) && _settings.PairedCustId.HasValue)
+        {
+            _settings = _settings with { PairedCustId = null, PairedDriverName = null };
+            _settingsStore.Save(_settings);
+        }
+
         var autostartActual = _autostartService.IsEnabled();
         if (autostartActual != _settings.LaunchAtStartup)
         {
@@ -53,6 +71,7 @@ public partial class App : WpfApplication
 
         _mainWindow = new MainWindow(
             initialSettings: _settings,
+            isPaired: !string.IsNullOrWhiteSpace(_deviceToken),
             onSettingsChanged: HandleSettingsChanged,
             onManualUpdateCheckRequested: () => RunUpdateCheckAsync(isManual: true),
             onApplyUpdateNowRequested: ApplyUpdateAndRestart,
@@ -68,7 +87,16 @@ public partial class App : WpfApplication
                 Dispatcher.Invoke(() => _mainWindow?.ApplyTelemetryStatus(status));
             }
         };
-        _telemetryCoordinator.Start(_settings);
+
+        _telemetryCoordinator.AuthRevoked += () =>
+        {
+            if (!_isExiting)
+            {
+                Dispatcher.Invoke(HandleAuthRevoked);
+            }
+        };
+
+        _telemetryCoordinator.Start(_settings, _deviceToken);
 
         if (!_startMinimized)
         {
@@ -102,9 +130,9 @@ public partial class App : WpfApplication
     private void HandleSettingsChanged(AppSettings updatedSettings)
     {
         var previousAutostart = _settings.LaunchAtStartup;
-        _settings = updatedSettings.Normalized();
+        _settings = (updatedSettings with { DeviceToken = null }).Normalized();
         _settingsStore.Save(_settings);
-        _telemetryCoordinator.UpdateSettings(_settings);
+        _telemetryCoordinator.UpdateSettings(_settings, _deviceToken);
 
         if (previousAutostart != _settings.LaunchAtStartup)
         {
@@ -126,17 +154,20 @@ public partial class App : WpfApplication
 
         if (result.Success && result.Response is not null)
         {
+            _deviceToken = result.Response.Token;
+            _tokenStore.SaveToken(_deviceToken);
+
             _settings = (_settings with
             {
                 ServerBaseUrl = serverUrl,
-                DeviceToken = result.Response.Token,
+                DeviceToken = null,
                 PairedDriverName = result.Response.DriverName,
                 PairedCustId = result.Response.CustId
             }).Normalized();
 
             _settingsStore.Save(_settings);
-            _telemetryCoordinator.UpdateSettings(_settings);
-            _mainWindow?.RefreshPairingUi(_settings);
+            _telemetryCoordinator.UpdateSettings(_settings, _deviceToken);
+            _mainWindow?.RefreshPairingUi(_settings, isPaired: true);
         }
 
         return result;
@@ -144,6 +175,9 @@ public partial class App : WpfApplication
 
     private void HandleUnpairRequested()
     {
+        _deviceToken = null;
+        _tokenStore.DeleteToken();
+
         _settings = (_settings with
         {
             DeviceToken = null,
@@ -152,8 +186,26 @@ public partial class App : WpfApplication
         }).Normalized();
 
         _settingsStore.Save(_settings);
-        _telemetryCoordinator.UpdateSettings(_settings);
-        _mainWindow?.RefreshPairingUi(_settings);
+        _telemetryCoordinator.UpdateSettings(_settings, _deviceToken);
+        _mainWindow?.RefreshPairingUi(_settings, isPaired: false);
+    }
+
+    private void HandleAuthRevoked()
+    {
+        _deviceToken = null;
+        _tokenStore.DeleteToken();
+
+        _settings = (_settings with
+        {
+            DeviceToken = null,
+            PairedDriverName = null,
+            PairedCustId = null
+        }).Normalized();
+
+        _settingsStore.Save(_settings);
+        _telemetryCoordinator.UpdateSettings(_settings, _deviceToken);
+        _mainWindow?.RefreshPairingUi(_settings, isPaired: false);
+        _mainWindow?.ShowAuthRevokedWarning();
     }
 
     private void StartPeriodicUpdateChecks()

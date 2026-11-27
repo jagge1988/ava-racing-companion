@@ -14,9 +14,10 @@ public sealed record TelemetryRuntimeStatus(
 /// <summary>
 /// Hintergrund-Koordinator:
 /// - Liest 60-Hz-Live-Telemetrie aus iRacing und puffert lokal in der Outbox.
+/// - Account- & Spectator-/Replay-Schutz: Pausiert persönliche Uploads (laps, pitstops, trace),
+///   sobald DriverUserID != paired_cust_id oder Spectator-/Replay-Modus aktiv ist.
 /// - Lädt NIEMALS Daten hoch und scannt KEINE .ibt-Dateien, solange der Fahrer aktiv im Auto sitzt (IsOnTrack == true).
-/// - Sobald der Fahrer aus dem Auto steigt (oder iRacing nicht läuft), werden neue .ibt-Dateien importiert
-///   und die Outbox sauber an den Bot-Server übertragen.
+/// - Meldet 401-Token-Widerruf (/unpair) über <see cref="AuthRevoked"/> an die UI.
 /// </summary>
 public sealed class TelemetryCoordinator : IDisposable
 {
@@ -29,12 +30,14 @@ public sealed class TelemetryCoordinator : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
     private AppSettings _settings = new();
+    private string? _deviceToken;
     private string _lastStatusText = "Warte auf iRacing...";
     private bool _lastConnected;
     private volatile bool _isDriverOnTrack;
     private volatile bool _manualIbtScanRequested;
 
     public event Action<TelemetryRuntimeStatus>? StatusChanged;
+    public event Action? AuthRevoked;
 
     public TelemetryCoordinator(
         OfflineUploadOutbox? outbox = null,
@@ -49,9 +52,10 @@ public sealed class TelemetryCoordinator : IDisposable
     public int PendingUploads => _outbox.PendingCount;
     public bool IsDriverOnTrack => _isDriverOnTrack;
 
-    public void UpdateSettings(AppSettings settings)
+    public void UpdateSettings(AppSettings settings, string? deviceToken)
     {
         _settings = settings.Normalized();
+        _deviceToken = deviceToken;
         _tracker.UploadTracesEnabled = _settings.UploadTracesEnabled;
     }
 
@@ -66,9 +70,9 @@ public sealed class TelemetryCoordinator : IDisposable
         return true;
     }
 
-    public void Start(AppSettings initialSettings)
+    public void Start(AppSettings initialSettings, string? deviceToken)
     {
-        UpdateSettings(initialSettings);
+        UpdateSettings(initialSettings, deviceToken);
         if (_cts is not null)
         {
             return;
@@ -113,6 +117,7 @@ public sealed class TelemetryCoordinator : IDisposable
         while (!ct.IsCancellationRequested)
         {
             var settings = _settings;
+            var token = _deviceToken;
 
             if (!settings.TelemetryEnabled)
             {
@@ -133,19 +138,18 @@ public sealed class TelemetryCoordinator : IDisposable
                 {
                     _isDriverOnTrack = false;
 
-                    // Fahrer ist nicht im Auto → .ibt-Dateien scannen & Outbox hochladen
                     if (ShouldRunIbtScan(settings, lastIbtScanUtc))
                     {
                         RunIbtScan(settings, ct);
                         lastIbtScanUtc = DateTimeOffset.UtcNow;
                     }
 
-                    if (await TryFlushOutboxAsync(settings, lastFlushUtc, ct).ConfigureAwait(false))
+                    if (await TryFlushOutboxAsync(settings, token, lastFlushUtc, ct).ConfigureAwait(false))
                     {
                         lastFlushUtc = DateTimeOffset.UtcNow;
                     }
 
-                    PublishStatus(false, false, BuildWaitingStatus(settings));
+                    PublishStatus(false, false, BuildWaitingStatus(token));
                     await Task.Delay(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false);
                     continue;
                 }
@@ -162,33 +166,56 @@ public sealed class TelemetryCoordinator : IDisposable
                 var wasOnTrack = _isDriverOnTrack;
                 _isDriverOnTrack = frame.IsOnTrack;
 
+                var meta = _sdkReader.CurrentMetadata;
+                var sessionType = meta.ResolveSessionType(frame.SessionNum);
+
+                var isSpectatorOrReplay = frame.IsReplayPlaying || meta.IsPlayerSpectator;
+                var isAccountMismatch = settings.PairedCustId.HasValue
+                    && meta.PlayerCustId > 0
+                    && meta.PlayerCustId != settings.PairedCustId.Value;
+                var allowPersonalUploads = !isSpectatorOrReplay && !isAccountMismatch;
+
                 var batch = _tracker.ProcessFrame(frame);
 
-                if (batch.LapsUpload is not null)
+                if (allowPersonalUploads)
                 {
-                    _outbox.Enqueue("/api/v1/telemetry/laps", batch.LapsUpload, gzip: false);
+                    if (batch.LapsUpload is not null)
+                    {
+                        _outbox.Enqueue("/api/v1/telemetry/laps", batch.LapsUpload, gzip: false);
+                    }
+
+                    if (batch.PitstopsUpload is not null)
+                    {
+                        _outbox.Enqueue("/api/v1/telemetry/pitstops", batch.PitstopsUpload, gzip: false);
+                    }
+
+                    if (batch.TraceUpload is not null)
+                    {
+                        _outbox.Enqueue("/api/v1/telemetry/trace", batch.TraceUpload, gzip: true);
+                    }
                 }
 
-                if (batch.PitstopsUpload is not null)
-                {
-                    _outbox.Enqueue("/api/v1/telemetry/pitstops", batch.PitstopsUpload, gzip: false);
-                }
-
-                if (batch.TraceUpload is not null)
-                {
-                    _outbox.Enqueue("/api/v1/telemetry/trace", batch.TraceUpload, gzip: true);
-                }
-
-                if (batch.RaceFieldUpload is not null)
+                if (!frame.IsReplayPlaying && batch.RaceFieldUpload is not null)
                 {
                     _outbox.Enqueue("/api/v1/telemetry/race-field", batch.RaceFieldUpload, gzip: false);
                     lastRaceFieldSyncUtc = DateTimeOffset.UtcNow;
                 }
 
-                var meta = _sdkReader.CurrentMetadata;
-                var sessionType = meta.ResolveSessionType(frame.SessionNum);
-
-                if (_isDriverOnTrack)
+                if (isAccountMismatch)
+                {
+                    PublishStatus(
+                        true,
+                        _isDriverOnTrack,
+                        $"Account-Abweichung: iRacing CustID {meta.PlayerCustId} ≠ gekoppelt ({settings.PairedCustId}) – persönliche Uploads pausiert.");
+                }
+                else if (isSpectatorOrReplay)
+                {
+                    PublishStatus(
+                        true,
+                        false,
+                        $"Spectator-/Replay-Modus ({meta.TrackDisplayName}) – persönliche Uploads pausiert.");
+                }
+                else if (_isDriverOnTrack)
                 {
                     PublishStatus(
                         true,
@@ -197,7 +224,6 @@ public sealed class TelemetryCoordinator : IDisposable
                 }
                 else
                 {
-                    // Fahrer ist gerade ausgestiegen → finalen Race-Field-Stand sichern
                     if (wasOnTrack && sessionType.Contains("Race", StringComparison.OrdinalIgnoreCase))
                     {
                         var snapshot = _tracker.BuildRaceFieldSnapshot();
@@ -214,8 +240,8 @@ public sealed class TelemetryCoordinator : IDisposable
                         $"iRacing im Menü (Uploads aktiv): {meta.TrackDisplayName} ({sessionType})");
                 }
 
-                // Periodischer Race-Field-Snapshot nur lokal in die Outbox (kein Netzwerk während Fahrt)
-                if (sessionType.Contains("Race", StringComparison.OrdinalIgnoreCase) &&
+                if (!frame.IsReplayPlaying &&
+                    sessionType.Contains("Race", StringComparison.OrdinalIgnoreCase) &&
                     DateTimeOffset.UtcNow - lastRaceFieldSyncUtc > TimeSpan.FromSeconds(60))
                 {
                     var snapshot = _tracker.BuildRaceFieldSnapshot();
@@ -227,7 +253,7 @@ public sealed class TelemetryCoordinator : IDisposable
                 }
             }
 
-            // WICHTIG: Uploads & .ibt-Import NUR solange der Fahrer NICHT aktiv im Auto sitzt!
+            // Uploads & .ibt-Import NUR solange der Fahrer NICHT aktiv im Auto sitzt
             if (!_isDriverOnTrack)
             {
                 if (ShouldRunIbtScan(settings, lastIbtScanUtc))
@@ -238,7 +264,7 @@ public sealed class TelemetryCoordinator : IDisposable
 
                 if (_outbox.PendingCount > 0 && DateTimeOffset.UtcNow - lastFlushUtc > TimeSpan.FromSeconds(5))
                 {
-                    if (await TryFlushOutboxAsync(settings, lastFlushUtc, ct).ConfigureAwait(false))
+                    if (await TryFlushOutboxAsync(settings, token, lastFlushUtc, ct).ConfigureAwait(false))
                     {
                         lastFlushUtc = DateTimeOffset.UtcNow;
                     }
@@ -271,6 +297,7 @@ public sealed class TelemetryCoordinator : IDisposable
             settings.IbtFolderPath,
             _outbox,
             settings.UploadTracesEnabled,
+            pairedCustId: settings.PairedCustId,
             onProgress: msg => PublishStatus(_lastConnected, false, msg, force: true),
             cancellationToken: ct);
 
@@ -284,9 +311,13 @@ public sealed class TelemetryCoordinator : IDisposable
         }
     }
 
-    private async Task<bool> TryFlushOutboxAsync(AppSettings settings, DateTimeOffset lastFlushUtc, CancellationToken ct)
+    private async Task<bool> TryFlushOutboxAsync(
+        AppSettings settings,
+        string? deviceToken,
+        DateTimeOffset lastFlushUtc,
+        CancellationToken ct)
     {
-        if (_isDriverOnTrack || !settings.IsPaired || string.IsNullOrWhiteSpace(settings.ServerBaseUrl) || _outbox.PendingCount == 0)
+        if (_isDriverOnTrack || string.IsNullOrWhiteSpace(deviceToken) || string.IsNullOrWhiteSpace(settings.ServerBaseUrl) || _outbox.PendingCount == 0)
         {
             return false;
         }
@@ -297,14 +328,23 @@ public sealed class TelemetryCoordinator : IDisposable
         }
 
         PublishStatus(_lastConnected, false, $"Lade {_outbox.PendingCount} Telemetrie-Paket(e) zum Bot-Server hoch ...", force: true);
-        await _outbox.FlushAsync(_apiClient, settings.ServerBaseUrl, settings.DeviceToken, ct).ConfigureAwait(false);
+        var flushResult = await _outbox.FlushAsync(_apiClient, settings.ServerBaseUrl, deviceToken, ct).ConfigureAwait(false);
+
+        if (flushResult.AuthRevoked)
+        {
+            _deviceToken = null;
+            PublishStatus(_lastConnected, false, "Geräte-Token wurde widerrufen (401). Bitte mit /pair neu koppeln.", force: true);
+            AuthRevoked?.Invoke();
+            return true;
+        }
+
         PublishStatus(_lastConnected, false, _lastStatusText, force: true);
         return true;
     }
 
-    private static string BuildWaitingStatus(AppSettings settings)
+    private static string BuildWaitingStatus(string? deviceToken)
     {
-        if (!settings.IsPaired)
+        if (string.IsNullOrWhiteSpace(deviceToken))
         {
             return "Warte auf Discord-Kopplung (/pair) und iRacing.";
         }

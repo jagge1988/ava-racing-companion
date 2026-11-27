@@ -59,6 +59,27 @@ public sealed class IbtFileReaderAndSyncTests : IDisposable
         Assert.Equal(2, outbox.PendingCount);
     }
 
+    [Fact]
+    public void IbtSyncService_SkipsPersonalUploadsWhenPairedCustIdDoesNotMatch()
+    {
+        var ibtDir = Path.Combine(_tempDir, "telemetry_mismatch");
+        var outboxDir = Path.Combine(_tempDir, "outbox_mismatch");
+        var stateFile = Path.Combine(_tempDir, "processed_mismatch.json");
+        Directory.CreateDirectory(ibtDir);
+
+        var ibtPath = Path.Combine(ibtDir, "guest_driver_spa.ibt");
+        File.WriteAllBytes(ibtPath, BuildSyntheticIbtFile(recordCount: 65)); // Driver CustId in Datei = 123456
+
+        var outbox = new OfflineUploadOutbox(outboxDir);
+        var syncService = new IbtSyncService(stateFile, minFileAge: TimeSpan.Zero);
+
+        // Gekoppelt ist ein anderer Account (999999) -> keine persönlichen laps/trace-Uploads!
+        var scan = syncService.ScanAndEnqueueNewFiles(ibtDir, outbox, uploadTracesEnabled: true, pairedCustId: 999999);
+        Assert.Equal(1, scan.FilesProcessed);
+        Assert.Equal(0, scan.PayloadsEnqueued);
+        Assert.Equal(0, outbox.PendingCount);
+    }
+
     private static byte[] BuildSyntheticIbtFile(int recordCount)
     {
         var yaml = """
