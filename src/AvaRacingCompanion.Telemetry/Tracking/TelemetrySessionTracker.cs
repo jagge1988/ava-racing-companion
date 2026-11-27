@@ -87,6 +87,7 @@ public sealed class TelemetrySessionTracker
     private bool _lapHadOfftrack;
     private int _tireAgeLaps;
     private int _lastCompoundIndex = -1;
+    private float _previousTickSdkLapLastLapTime;
     private readonly LapTraceBuffer _trace = new();
 
     // Aktiver Fahrer – Pitstop-Status
@@ -169,6 +170,8 @@ public sealed class TelemetrySessionTracker
             RecordActiveLapSample(frame);
         }
 
+        _previousTickSdkLapLastLapTime = frame.LapLastLapTimeSeconds;
+
         // 3. Race-Session: komplettes Fahrerfeld (CarIdx*) für /pitstops
         if (IsRaceSession(frame.SessionNum))
         {
@@ -245,10 +248,19 @@ public sealed class TelemetrySessionTracker
     private (LapTelemetryDto? Lap, LapTraceUploadRequest? Trace) CompleteLap(TelemetryFrame frame)
     {
         var lapNumber = _currentLap;
-        var lapTimeMs = frame.LapLastLapTimeSeconds > 0.5f
+        var measuredLapTimeMs = (int)Math.Round(Math.Max(0.0, frame.SessionTimeSeconds - _lapStartSessionTime) * 1000.0);
+        var sdkLapTimeMs = frame.LapLastLapTimeSeconds > 0.5f
             ? (int)Math.Round(frame.LapLastLapTimeSeconds * 1000.0)
-            : (int)Math.Round(Math.Max(0.0, frame.SessionTimeSeconds - _lapStartSessionTime) * 1000.0);
+            : 0;
 
+        // Im iRacing-SDK aktualisiert LapLastLapTime oft erst 1-2 Ticks nach dem Lap-Sprung.
+        // Daher darf LapLastLapTime nur genutzt werden, wenn es sich exakt beim Rundenwechsel
+        // geändert hat UND zur gemessenen Runden-/Trace-Dauer (±250 ms) passt.
+        var sdkUpdatedOnCrossing = sdkLapTimeMs > 0
+            && Math.Abs(frame.LapLastLapTimeSeconds - _previousTickSdkLapLastLapTime) > 0.0005f
+            && Math.Abs(sdkLapTimeMs - measuredLapTimeMs) <= 250;
+
+        var lapTimeMs = sdkUpdatedOnCrossing ? sdkLapTimeMs : measuredLapTimeMs;
         if (lapTimeMs <= 0)
         {
             return (null, null);
@@ -381,7 +393,8 @@ public sealed class TelemetrySessionTracker
         {
             _playerOnPitRoad = false;
             var pitlaneTimeS = Math.Max(0.0, frame.SessionTimeSeconds - _playerPitEntryTime);
-            if (pitlaneTimeS < 2.0)
+            // Boxenausfahrt am Session-Start (Lap 0) sowie Durchfahrten < 2s ignorieren
+            if (_playerPitStartLap <= 0 || pitlaneTimeS < 2.0)
             {
                 return null;
             }
@@ -554,6 +567,7 @@ public sealed class TelemetrySessionTracker
         _lapHadOfftrack = false;
         _tireAgeLaps = 0;
         _lastCompoundIndex = -1;
+        _previousTickSdkLapLastLapTime = 0f;
         _trace.Clear();
 
         _playerOnPitRoad = false;

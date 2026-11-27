@@ -71,14 +71,14 @@ public sealed class TelemetrySessionTrackerTests
             Assert.Null(outp.RaceFieldUpload);
         }
 
-        // Übergang auf Runde 2 löst Lap + 60-Hz-Trace aus
+        // Übergang auf Runde 2 löst Lap + 60-Hz-Trace aus (gemessene Dauer 2,0 s; SDK meldet 2,010 s)
         var completed = tracker.ProcessFrame(new TelemetryFrame
         {
             TickCount = 120,
             SessionTimeSeconds = 102.0,
             SessionNum = 0,
             Lap = 2,
-            LapLastLapTimeSeconds = 138.450f,
+            LapLastLapTimeSeconds = 2.010f,
             FuelLevelLiters = 47.0f,
             TrackTempCelsius = 29.5f,
             PlayerTireCompound = 1,
@@ -89,7 +89,7 @@ public sealed class TelemetrySessionTrackerTests
         Assert.Null(completed.RaceFieldUpload);
         var lap = Assert.Single(completed.LapsUpload.Laps);
         Assert.Equal(1, lap.LapNumber);
-        Assert.Equal(138450, lap.LapTimeMs);
+        Assert.Equal(2010, lap.LapTimeMs);
         Assert.Equal(3.0, lap.FuelUsedL, precision: 2);
         Assert.Equal("Medium", lap.TireCompound);
         Assert.Equal(1, lap.TireAgeLaps);
@@ -192,5 +192,115 @@ public sealed class TelemetrySessionTrackerTests
     {
         Assert.Equal(0.0, TelemetryMath.ComputeSlipAngleDeg(1.0, 0.5));
         Assert.InRange(TelemetryMath.ComputeSlipAngleDeg(40.0, 4.0), 5.5, 6.0);
+    }
+
+    [Fact]
+    public void CompleteLap_WhenSdkLapLastLapTimeLagsBehind_UsesMeasuredDurationWithoutOffByOne()
+    {
+        var tracker = new TelemetrySessionTracker { UploadTracesEnabled = true };
+        tracker.UpdateMetadata(CreateMetadata());
+
+        // Runde 7 dauert exakt 110,0 s; währenddessen steht LapLastLapTime noch auf Runde 6 (90,5 s)
+        for (var i = 0; i < 66; i++)
+        {
+            tracker.ProcessFrame(new TelemetryFrame
+            {
+                TickCount = i,
+                SessionTimeSeconds = 100.0 + (i * (110.0 / 66.0)),
+                SessionNum = 2,
+                Lap = 7,
+                LapLastLapTimeSeconds = 90.500f,
+                FuelLevelLiters = 40f
+            });
+        }
+
+        // Übergang auf Runde 8: SDK-Lag! LapLastLapTime zeigt noch immer 90,500 s (Runde 6)
+        var lap7Done = tracker.ProcessFrame(new TelemetryFrame
+        {
+            TickCount = 66,
+            SessionTimeSeconds = 210.0,
+            SessionNum = 2,
+            Lap = 8,
+            LapLastLapTimeSeconds = 90.500f,
+            FuelLevelLiters = 37f
+        });
+
+        Assert.NotNull(lap7Done.LapsUpload);
+        var lap7 = Assert.Single(lap7Done.LapsUpload.Laps);
+        Assert.Equal(7, lap7.LapNumber);
+        Assert.InRange(lap7.LapTimeMs, 109900, 110100);
+
+        // 1 Tick später aktualisiert iRacing LapLastLapTime auf Runde 7 (110,0 s), während Runde 8 (91,0 s) läuft
+        for (var i = 1; i < 66; i++)
+        {
+            tracker.ProcessFrame(new TelemetryFrame
+            {
+                TickCount = 66 + i,
+                SessionTimeSeconds = 210.0 + (i * (91.0 / 66.0)),
+                SessionNum = 2,
+                Lap = 8,
+                LapLastLapTimeSeconds = 110.000f,
+                FuelLevelLiters = 36f
+            });
+        }
+
+        // Übergang auf Runde 9: SDK-Lag! LapLastLapTime zeigt noch 110,000 s (Runde 7)
+        var lap8Done = tracker.ProcessFrame(new TelemetryFrame
+        {
+            TickCount = 200,
+            SessionTimeSeconds = 301.0,
+            SessionNum = 2,
+            Lap = 9,
+            LapLastLapTimeSeconds = 110.000f,
+            FuelLevelLiters = 34f
+        });
+
+        Assert.NotNull(lap8Done.LapsUpload);
+        var lap8 = Assert.Single(lap8Done.LapsUpload.Laps);
+        Assert.Equal(8, lap8.LapNumber);
+        Assert.InRange(lap8.LapTimeMs, 90900, 91100);
+    }
+
+    [Fact]
+    public void PitstopOnLapZero_AtSessionStart_IsFilteredOut()
+    {
+        var tracker = new TelemetrySessionTracker { UploadTracesEnabled = false };
+        tracker.UpdateMetadata(CreateMetadata());
+
+        // Fahrer startet in der Box auf Lap 0 und fährt nach 15 Sekunden raus
+        tracker.ProcessFrame(new TelemetryFrame
+        {
+            TickCount = 1,
+            SessionTimeSeconds = 10.0,
+            SessionNum = 0,
+            Lap = 0,
+            OnPitRoad = true,
+            PlayerTrackSurface = TrackSurface.InPitStall,
+            FuelLevelLiters = 50f
+        });
+
+        tracker.ProcessFrame(new TelemetryFrame
+        {
+            TickCount = 2,
+            SessionTimeSeconds = 20.0,
+            SessionNum = 0,
+            Lap = 0,
+            OnPitRoad = true,
+            PlayerTrackSurface = TrackSurface.InPitStall,
+            FuelLevelLiters = 50f
+        });
+
+        var exit = tracker.ProcessFrame(new TelemetryFrame
+        {
+            TickCount = 3,
+            SessionTimeSeconds = 25.0,
+            SessionNum = 0,
+            Lap = 0,
+            OnPitRoad = false,
+            PlayerTrackSurface = TrackSurface.OnTrack,
+            FuelLevelLiters = 50f
+        });
+
+        Assert.Null(exit.PitstopsUpload);
     }
 }

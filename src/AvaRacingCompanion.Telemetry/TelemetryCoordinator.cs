@@ -135,6 +135,17 @@ public sealed class TelemetryCoordinator : IDisposable
 
             if (!_sdkReader.IsConnected)
             {
+                if (_lastConnected)
+                {
+                    // Falls iRacing direkt aus dem Auto beendet wurde, letzten Race-Field-Stand noch sichern
+                    var finalSnapshot = _tracker.BuildRaceFieldSnapshot();
+                    if (finalSnapshot is not null)
+                    {
+                        _outbox.Enqueue("/api/v1/telemetry/race-field", finalSnapshot, gzip: false);
+                        AppLogger.Shared.Info("RaceField", $"Finaler Race-Field-Snapshot beim Disconnect eingereiht ({finalSnapshot.Drivers.Count} Fahrer).");
+                    }
+                }
+
                 if (!_sdkReader.TryConnect())
                 {
                     _isDriverOnTrack = false;
@@ -201,6 +212,7 @@ public sealed class TelemetryCoordinator : IDisposable
                 if (!frame.IsReplayPlaying && batch.RaceFieldUpload is not null)
                 {
                     _outbox.Enqueue("/api/v1/telemetry/race-field", batch.RaceFieldUpload, gzip: false);
+                    AppLogger.Shared.Info("RaceField", $"Race-Field-Update nach Pitstop eingereiht ({batch.RaceFieldUpload.Drivers.Count} Fahrer).");
                     lastRaceFieldSyncUtc = DateTimeOffset.UtcNow;
                 }
 
